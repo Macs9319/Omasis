@@ -377,7 +377,7 @@ Panel {
       id: card
       required property var modelData
 
-      width: column.width
+      width: ListView.view ? ListView.view.width : 0
       implicitHeight: cardBody.implicitHeight + Style.space(20)
 
       readonly property bool installed: root.installedIds[card.modelData.id] !== undefined
@@ -522,7 +522,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(480))
-    contentHeight: panel.fittedContentHeight(Math.min(Style.space(560), column.implicitHeight))
+    contentHeight: panel.fittedContentHeight(Style.space(560))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -530,18 +530,29 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
 
-      Flickable {
-        id: listScroll
+      // ListView rather than a plain Repeater-in-a-Column: the registry
+      // has ~660 entries, and a Repeater instantiates every delegate for
+      // its whole model immediately, whether on screen or not. With "All"
+      // selected that is ~660 card items (each ~10 child Text/Rectangle/
+      // Button elements) built synchronously the moment the popup opens —
+      // the actual cause of the slow-to-open popup. ListView only
+      // realizes delegates near the visible viewport (plus cacheBuffer)
+      // and reuses them while scrolling, so opening cost no longer scales
+      // with the registry size, only with what is actually on screen.
+      ListView {
+        id: listView
         anchors.fill: parent
-        contentWidth: width
-        contentHeight: column.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height
+        reuseItems: true
+        cacheBuffer: Style.space(600)
+        spacing: Style.space(6)
 
-        Column {
-          id: column
-          width: listScroll.width
+        model: root.filteredEntries
+        delegate: cardDelegate
+
+        header: Column {
+          width: listView.width
           spacing: Style.space(12)
 
           // ---------- Header: title + refresh ----------
@@ -675,14 +686,9 @@ Panel {
             font.italic: true
           }
 
-          Column {
-            width: parent.width
-            spacing: Style.space(6)
-
-            Repeater {
-              model: root.filteredEntries
-              delegate: cardDelegate
-            }
+          Item {
+            width: 1
+            height: Style.space(2)
           }
         }
       }
