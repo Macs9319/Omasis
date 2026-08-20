@@ -527,6 +527,14 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // Without this, PanelKeyCatcher's Keys.priority: Keys.BeforeItem
+      // intercepts every keystroke ahead of the search field — 'j'/'k'/
+      // 'h'/'l'/'x' get eaten as list-navigation commands, and even
+      // plain characters only reach the field inconsistently. This is
+      // the exact case the component's own doc comment calls out:
+      // block it while the inline editor has focus so it forwards keys
+      // through normally instead of racing the field for them.
+      blocked: searchField.activeFocus
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
 
