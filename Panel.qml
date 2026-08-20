@@ -520,7 +520,17 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: keyCatcher
+    // KeyboardPanel primes real Wayland keyboard focus (a brief
+    // WlrKeyboardFocus.Exclusive grab on open, settling to OnDemand) onto
+    // exactly one item: whatever focusTarget is, via
+    // Qt.callLater(focusTarget.forceActiveFocus()) in its own onOpenChanged.
+    // That's the only focus handoff guaranteed to survive the
+    // Exclusive-to-OnDemand transition. Pointing it at keyCatcher (as other
+    // panels do, since they have no real text input) left the search field
+    // dependent on a later click to steal focus after that window had
+    // already closed — which is why it could take one character and then
+    // lose focus entirely. Priming the field itself sidesteps that.
+    focusTarget: searchField
     contentWidth: panel.fittedContentWidth(Style.space(480))
     contentHeight: panel.fittedContentHeight(Style.space(560))
 
@@ -650,14 +660,19 @@ Panel {
             width: parent.width
             placeholderText: "Search plugins, tags, authors…"
             foreground: root.bar.foreground
-            // Debounced rather than assigning root.searchText directly:
-            // that property feeds filteredEntries, which is bound to
-            // ListView.model, so every keystroke was synchronously
-            // forcing the whole list to re-layout inside that same
-            // keystroke's own event handling — the field losing focus
-            // on every character. Deferring the reactive update off the
-            // keystroke's call stack, plus reclaiming focus after it
-            // fires, keeps typing itself from ever touching the list.
+            // PanelKeyCatcher is blocked while this field has focus (see
+            // below), which also skips its own Escape-to-close handling —
+            // restore that directly so Escape still dismisses the panel
+            // while typing instead of being swallowed silently.
+            Keys.onEscapePressed: root.close()
+            // Debounced rather than assigning root.searchText on every
+            // keystroke: that property feeds filteredEntries, which is
+            // bound to ListView.model, so writing it straight from
+            // onTextChanged would force the whole list to re-layout
+            // synchronously inside each keystroke's own event handling.
+            // Not the cause of the focus loss (that was KeyboardPanel's
+            // focus priming, fixed above via focusTarget), but still
+            // worth avoiding on its own merits.
             onTextChanged: searchDebounce.restart()
           }
 
