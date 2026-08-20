@@ -6,6 +6,7 @@
   "author": "ronnie",
   "description": "Browse, search, and one-click install community Omarchy plugins from omarchyplugins.com",
   "kinds": ["bar-widget"],
+  "keepLoaded": true,
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
