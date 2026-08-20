@@ -63,6 +63,12 @@ Panel {
     if (root.opened) {
       root.checkInstalled()
       root.maybeRefresh()
+      // keepLoaded means the ListView's scroll position survives close/
+      // reopen, so browsing down once and reopening later would otherwise
+      // land back in the middle of the list instead of the title/search
+      // box. Qt.callLater defers this past the current layout pass —
+      // calling it synchronously here was inconsistent in testing.
+      Qt.callLater(function () { listView.positionViewAtBeginning() })
     }
   }
 
