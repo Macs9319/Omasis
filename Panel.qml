@@ -38,6 +38,14 @@ Panel {
   property var installingIds: Object.create(null)
   property double lastFetchedAtMs: 0
 
+  // ListView.header is typed as Component, so QML implicitly wraps its
+  // content in one — ids declared inside it (searchField) are scoped to
+  // that component and are NOT visible to bindings outside it, like
+  // KeyboardPanel.focusTarget or PanelKeyCatcher.blocked below. Bridging
+  // through a property on root (assigned from within the header, where
+  // the id IS valid) is the standard way around that scope boundary.
+  property Item searchFieldRef: null
+
   // Easter egg: click the "Omasis" title 9 times to run an "Omanova"
   // ticker across the header. titleClicks resets on its own after a
   // pause so it counts a burst of clicks, not lifetime clicks.
@@ -530,7 +538,7 @@ Panel {
     // dependent on a later click to steal focus after that window had
     // already closed — which is why it could take one character and then
     // lose focus entirely. Priming the field itself sidesteps that.
-    focusTarget: searchField
+    focusTarget: root.searchFieldRef
     contentWidth: panel.fittedContentWidth(Style.space(480))
     contentHeight: panel.fittedContentHeight(Style.space(560))
 
@@ -544,7 +552,7 @@ Panel {
       // the exact case the component's own doc comment calls out:
       // block it while the inline editor has focus so it forwards keys
       // through normally instead of racing the field for them.
-      blocked: searchField.activeFocus
+      blocked: !!root.searchFieldRef && root.searchFieldRef.activeFocus
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
 
@@ -562,6 +570,13 @@ Panel {
         anchors.fill: parent
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // Every model update (i.e. every keystroke, once debounced) reset
+        // currentIndex, and ListView's built-in keyboard-navigation
+        // bookkeeping momentarily pulled active focus off the search field
+        // for it — masked by the debounce timer's forceActiveFocus()
+        // reclaiming it right after, but still a visible flicker. Nothing
+        // here uses arrow-key list navigation, so just turn it off.
+        keyNavigationEnabled: false
         reuseItems: true
         cacheBuffer: Style.space(600)
         spacing: Style.space(6)
@@ -660,6 +675,7 @@ Panel {
             width: parent.width
             placeholderText: "Search plugins, tags, authors…"
             foreground: root.bar.foreground
+            Component.onCompleted: root.searchFieldRef = searchField
             // PanelKeyCatcher is blocked while this field has focus (see
             // below), which also skips its own Escape-to-close handling —
             // restore that directly so Escape still dismisses the panel
@@ -668,11 +684,12 @@ Panel {
             // Debounced rather than assigning root.searchText on every
             // keystroke: that property feeds filteredEntries, which is
             // bound to ListView.model, so writing it straight from
-            // onTextChanged would force the whole list to re-layout
-            // synchronously inside each keystroke's own event handling.
-            // Not the cause of the focus loss (that was KeyboardPanel's
-            // focus priming, fixed above via focusTarget), but still
-            // worth avoiding on its own merits.
+            // onTextChanged forces the list to re-layout inside each
+            // keystroke's own event handling, which still blurs the field
+            // for a frame (ListView resets currentIndex on every model
+            // swap). The Qt.callLater reclaim below catches it before it
+            // is visible, but only because it is debounced off the
+            // keystroke itself rather than fighting it head-on.
             onTextChanged: searchDebounce.restart()
           }
 
