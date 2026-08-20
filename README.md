@@ -5,6 +5,11 @@ shell bar. Browse, search, and filter the plugin registry behind
 [omarchyplugins.com](https://omarchyplugins.com) and install anything in it
 with one click — all from the bar, no browser or terminal required.
 
+<p align="center">
+  <img src="screenshots/bar-icon.png" alt="Bar icon" width="500"><br>
+  <img src="screenshots/panel.png" alt="Omasis panel" width="360">
+</p>
+
 ## Install
 
 **Option 1 — `omarchy plugin add` (recommended):**
