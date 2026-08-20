@@ -24,13 +24,18 @@ Panel {
   readonly property string icon: "🧩"
 
   property var allEntries: []
-  property var installedIds: ({})
+  // Object.create(null) rather than {} for every id-keyed map below: ids
+  // and accents come from a public, community-editable registry, and a
+  // crafted id like "__proto__" used as a bracket-access key on a normal
+  // object literal can pollute Object.prototype. A null-prototype object
+  // has no inherited keys to collide with.
+  property var installedIds: Object.create(null)
   property string searchText: ""
   property string activeCategory: ""
   property bool loading: false
   property string statusMessage: ""
   property bool statusIsError: false
-  property var installingIds: ({})
+  property var installingIds: Object.create(null)
   property double lastFetchedAtMs: 0
 
   implicitWidth: button.implicitWidth
@@ -45,8 +50,22 @@ Panel {
 
   // ---------- helpers ----------
 
-  function shellQuote(s) {
-    return "'" + String(s).replace(/'/g, "'\\''") + "'"
+  // Allowlist gate before anything reaches `git clone` (via `omarchy plugin
+  // add`) or `Qt.openUrlExternally`. The registry is public and
+  // community-editable, and git supports transport schemes (`ext::` in
+  // particular) that run arbitrary shell commands when given as a clone
+  // URL — restricting to plain https://github.com/<owner>/<repo> closes
+  // that off entirely. omasis.sh already computes this server-side as
+  // `repoSafe`; this is the client-side belt-and-suspenders check run
+  // again right before either action, in case the cache is stale or was
+  // written by an older version of the script.
+  function isInstallableRepo(url) {
+    return /^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*(\.git)?\/?$/.test(String(url || ""))
+  }
+
+  function truncate(s, max) {
+    var str = String(s || "")
+    return str.length > max ? str.slice(0, max) + "…" : str
   }
 
   function humanize(id) {
@@ -74,7 +93,10 @@ Panel {
   })
 
   function accentColorFor(e) {
-    if (e.accent && root.accentPalette[e.accent]) return root.accentPalette[e.accent]
+    // hasOwnProperty guard: e.accent is registry-controlled, and indexing
+    // a plain object literal with a key like "constructor" or
+    // "__proto__" resolves to an inherited value instead of undefined.
+    if (e.accent && Object.prototype.hasOwnProperty.call(root.accentPalette, e.accent)) return root.accentPalette[e.accent]
     var keys = Object.keys(root.accentPalette)
     var h = 0
     var idStr = String(e.id || "")
@@ -83,7 +105,7 @@ Panel {
   }
 
   function initialsFor(e) {
-    if (e.initials) return e.initials
+    if (e.initials) return String(e.initials).slice(0, 3)
     var parts = String(e.id || "?").split(/[.\-_]+/).filter(function (p) { return p.length > 0 })
     var a = (parts[0] || "?").charAt(0)
     var b = (parts[1] || "").charAt(0)
@@ -173,7 +195,10 @@ Panel {
 
   function checkInstalled() {
     if (installedProc.running) return
-    installedProc.command = ["bash", "-c", "omarchy plugin list --json"]
+    // Plain argv, no shell — this command has no variable input, but
+    // running everything without a shell by default is the cheaper habit
+    // than auditing each call site for whether it currently needs one.
+    installedProc.command = ["omarchy", "plugin", "list", "--json"]
     installedProc.running = true
   }
 
@@ -184,9 +209,11 @@ Panel {
       onStreamFinished: {
         try {
           var arr = JSON.parse(String(text || "").trim())
-          var map = {}
+          var map = Object.create(null)
           if (Array.isArray(arr)) {
-            for (var i = 0; i < arr.length; i++) map[arr[i].id] = arr[i]
+            for (var i = 0; i < arr.length; i++) {
+              if (arr[i] && typeof arr[i].id === "string") map[arr[i].id] = arr[i]
+            }
           }
           root.installedIds = map
         } catch (e) {
@@ -199,8 +226,12 @@ Panel {
   // ---------- install action ----------
 
   function installEntry(entry) {
+    if (entry.installType === "manual" || !root.isInstallableRepo(entry.repo)) {
+      root.setStatus(root.displayName(entry) + " can't be installed automatically", true)
+      return
+    }
     if (root.installingIds[entry.id]) return
-    var installing = {}
+    var installing = Object.create(null)
     for (var k in root.installingIds) installing[k] = root.installingIds[k]
     installing[entry.id] = true
     root.installingIds = installing
@@ -208,21 +239,25 @@ Panel {
     root.setStatus("Installing " + root.displayName(entry) + "…", false)
     installProc.entryId = entry.id
     installProc.entryName = root.displayName(entry)
-    installProc.command = ["bash", "-c", "omarchy plugin add " + root.shellQuote(entry.repo) + " --yes --enable"]
+    // Plain argv passed straight to execve — no shell involved, so there's
+    // no quoting to get right and no metacharacters to worry about. The
+    // isInstallableRepo() check above is what actually matters here: it's
+    // the only thing standing between this repo URL and `git clone`.
+    installProc.command = ["omarchy", "plugin", "add", entry.repo, "--yes", "--enable"]
     installProc.running = true
   }
 
   function clearInstalling(id) {
-    var installing = {}
+    var installing = Object.create(null)
     for (var k in root.installingIds) if (k !== id) installing[k] = root.installingIds[k]
     root.installingIds = installing
   }
 
   function showManualInfo(entry) {
-    var note = entry.installNote || "This plugin needs manual setup — see the repo for instructions."
-    var cmd = entry.installCommand ? (" Run: " + entry.installCommand) : ""
+    var note = root.truncate(entry.installNote || "This plugin needs manual setup — see the repo for instructions.", 300)
+    var cmd = entry.installCommand ? (" Run: " + root.truncate(entry.installCommand, 300)) : ""
     root.setStatus(root.displayName(entry) + " — " + note + cmd, false)
-    Qt.openUrlExternally(entry.repo)
+    if (root.isInstallableRepo(entry.repo)) Qt.openUrlExternally(entry.repo)
   }
 
   Process {
@@ -243,19 +278,22 @@ Panel {
       if (exitCode === 0) {
         root.setStatus("Installed " + finishedName, false)
         root.checkInstalled()
-        notifyProc.command = ["notify-send", "-a", "Omasis", "Installed", finishedName]
+        // "--" ends option parsing so a crafted plugin name starting with
+        // "-" (e.g. "--icon=/some/path") is taken as the literal summary
+        // text instead of being parsed as a notify-send flag.
+        notifyProc.command = ["notify-send", "-a", "Omasis", "--", "Installed", finishedName]
         notifyProc.running = true
         return
       }
 
-      var msg = installProc._stderrText.trim().replace(/^omarchy-plugin-add:\s*/, "")
+      var msg = root.truncate(installProc._stderrText.trim().replace(/^omarchy-plugin-add:\s*/, ""), 300)
       if (msg.indexOf("already installed") !== -1) {
         root.checkInstalled()
         root.setStatus(finishedName + " is already installed", false)
         return
       }
       root.setStatus("Failed to install " + finishedName + (msg ? ": " + msg : ""), true)
-      notifyProc.command = ["notify-send", "-a", "Omasis", "-u", "critical", "Install failed", finishedName + (msg ? " — " + msg : "")]
+      notifyProc.command = ["notify-send", "-a", "Omasis", "-u", "critical", "--", "Install failed", finishedName + (msg ? " — " + msg : "")]
       notifyProc.running = true
     }
   }
@@ -265,7 +303,7 @@ Panel {
   // ---------- search + filter ----------
 
   readonly property var categoryCounts: {
-    var counts = {}
+    var counts = Object.create(null)
     root.allEntries.forEach(function (e) {
       var c = e.category || "Other"
       counts[c] = (counts[c] || 0) + 1
@@ -286,7 +324,8 @@ Panel {
     return root.allEntries.filter(function (e) {
       if (root.activeCategory !== "" && e.category !== root.activeCategory) return false
       if (q === "") return true
-      var hay = (root.displayName(e) + " " + root.authorFor(e) + " " + (e.category || "") + " " + (e.tags || []).join(" ")).toLowerCase()
+      var tags = Array.isArray(e.tags) ? e.tags : []
+      var hay = (root.displayName(e) + " " + root.authorFor(e) + " " + (e.category || "") + " " + tags.join(" ")).toLowerCase()
       return hay.indexOf(q) !== -1
     })
   }
@@ -349,6 +388,7 @@ Panel {
           Text {
             anchors.centerIn: parent
             text: root.initialsFor(card.modelData)
+            textFormat: Text.PlainText
             color: Color.background
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -364,6 +404,7 @@ Panel {
           Text {
             width: parent.width
             text: root.displayName(card.modelData)
+            textFormat: Text.PlainText
             color: root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
@@ -378,10 +419,11 @@ Panel {
               var author = root.authorFor(card.modelData)
               if (author !== "") bits.push(author)
               bits.push(card.modelData.category || "Other")
-              var tags = card.modelData.tags || []
+              var tags = Array.isArray(card.modelData.tags) ? card.modelData.tags : []
               if (tags.length > 0) bits.push(tags.slice(0, 3).join(", "))
               return bits.join(" • ")
             }
+            textFormat: Text.PlainText
             color: Qt.darker(root.bar.foreground, 1.5)
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
@@ -395,13 +437,18 @@ Panel {
             Text {
               visible: card.modelData.securityOutcome === "passed"
               text: "✓ scanned"
+              textFormat: Text.PlainText
               color: Qt.darker(root.bar.foreground, 1.3)
               font.pixelSize: Style.font.caption
               font.family: root.bar.fontFamily
             }
             Text {
+              // securityOutcome is only ever "needs-fixes"/"review-required"
+              // here (omasis.sh clamps it to a fixed enum before caching),
+              // but PlainText is cheap insurance against a stale cache.
               visible: card.modelData.securityOutcome === "needs-fixes" || card.modelData.securityOutcome === "review-required"
               text: "⚠ " + (card.modelData.securityOutcome || "")
+              textFormat: Text.PlainText
               color: Color.urgent
               font.pixelSize: Style.font.caption
               font.family: root.bar.fontFamily
@@ -409,6 +456,7 @@ Panel {
             Text {
               visible: !!card.modelData.maintainerReviewed
               text: "★ maintainer-reviewed"
+              textFormat: Text.PlainText
               color: Color.accent
               font.pixelSize: Style.font.caption
               font.family: root.bar.fontFamily
@@ -502,9 +550,13 @@ Panel {
           }
 
           Text {
+            // statusMessage is built from displayName()/installNote/
+            // installCommand (all registry-controlled) plus raw CLI
+            // stderr, so it is the least trustworthy string in this file.
             visible: root.statusMessage !== ""
             width: parent.width
             text: root.statusMessage
+            textFormat: Text.PlainText
             color: root.statusIsError ? Color.urgent : Qt.darker(root.bar.foreground, 1.3)
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
