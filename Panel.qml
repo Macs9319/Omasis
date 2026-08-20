@@ -38,6 +38,12 @@ Panel {
   property var installingIds: Object.create(null)
   property double lastFetchedAtMs: 0
 
+  // Easter egg: click the "Omasis" title 9 times to run an "Omanova"
+  // ticker across the header. titleClicks resets on its own after a
+  // pause so it counts a burst of clicks, not lifetime clicks.
+  property int titleClicks: 0
+  property bool showEasterEgg: false
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -116,6 +122,26 @@ Panel {
     root.statusMessage = msg
     root.statusIsError = !!isError
     statusClearTimer.restart()
+  }
+
+  function handleTitleClick() {
+    root.titleClicks += 1
+    titleClickResetTimer.restart()
+    if (root.titleClicks >= 9) {
+      root.titleClicks = 0
+      root.triggerEasterEgg()
+    }
+  }
+
+  function triggerEasterEgg() {
+    root.showEasterEgg = true
+    tickerAnim.restart()
+  }
+
+  Timer {
+    id: titleClickResetTimer
+    interval: 1500
+    onTriggered: root.titleClicks = 0
   }
 
   // ---------- registry fetch + cache ----------
@@ -526,12 +552,19 @@ Panel {
             Text {
               id: headerText
               text: "Omasis"
+              textFormat: Text.PlainText
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.title
               font.bold: true
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
+            }
+
+            MouseArea {
+              anchors.fill: headerText
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.handleTitleClick()
             }
 
             Button {
@@ -546,6 +579,36 @@ Panel {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               onClicked: root.refresh()
+            }
+          }
+
+          Item {
+            id: tickerContainer
+            width: parent.width
+            height: root.showEasterEgg ? tickerText.implicitHeight : 0
+            visible: root.showEasterEgg
+            clip: true
+
+            Text {
+              id: tickerText
+              text: "Omanova"
+              textFormat: Text.PlainText
+              color: Color.accent
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+              x: tickerContainer.width
+            }
+
+            NumberAnimation {
+              id: tickerAnim
+              target: tickerText
+              property: "x"
+              from: tickerContainer.width
+              to: -tickerText.implicitWidth
+              duration: 3500
+              easing.type: Easing.Linear
+              onFinished: root.showEasterEgg = false
             }
           }
 
