@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "omasis",
+  "name": "Omasis",
+  "version": "1.0.0",
+  "author": "ronnie",
+  "description": "Browse, search, and one-click install community Omarchy plugins from omarchyplugins.com",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Omasis",
+    "description": "Community plugin marketplace browser",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
