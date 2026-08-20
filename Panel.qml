@@ -51,6 +51,10 @@ Panel {
   // pause so it counts a burst of clicks, not lifetime clicks.
   property int titleClicks: 0
   property bool showEasterEgg: false
+  // Same header-Component scope problem as searchFieldRef above: tickerAnim
+  // lives inside the header too, so triggerEasterEgg() (on root) cannot
+  // reach it directly.
+  property var tickerAnimRef: null
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -143,7 +147,7 @@ Panel {
 
   function triggerEasterEgg() {
     root.showEasterEgg = true
-    tickerAnim.restart()
+    if (root.tickerAnimRef) root.tickerAnimRef.restart()
   }
 
   Timer {
@@ -653,6 +657,7 @@ Panel {
               duration: 3500
               easing.type: Easing.Linear
               onFinished: root.showEasterEgg = false
+              Component.onCompleted: root.tickerAnimRef = tickerAnim
             }
           }
 
