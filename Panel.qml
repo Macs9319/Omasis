@@ -650,7 +650,26 @@ Panel {
             width: parent.width
             placeholderText: "Search plugins, tags, authors…"
             foreground: root.bar.foreground
-            onTextChanged: root.searchText = text
+            // Debounced rather than assigning root.searchText directly:
+            // that property feeds filteredEntries, which is bound to
+            // ListView.model, so every keystroke was synchronously
+            // forcing the whole list to re-layout inside that same
+            // keystroke's own event handling — the field losing focus
+            // on every character. Deferring the reactive update off the
+            // keystroke's call stack, plus reclaiming focus after it
+            // fires, keeps typing itself from ever touching the list.
+            onTextChanged: searchDebounce.restart()
+          }
+
+          Timer {
+            id: searchDebounce
+            interval: 150
+            onTriggered: {
+              root.searchText = searchField.text
+              Qt.callLater(function () {
+                if (!searchField.activeFocus) searchField.forceActiveFocus()
+              })
+            }
           }
 
           Flow {
