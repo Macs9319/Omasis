@@ -36,6 +36,10 @@ Panel {
   property string statusMessage: ""
   property bool statusIsError: false
   property var installingIds: Object.create(null)
+  // installProc (below) is a single shared Process, so only one install
+  // can run at a time; installEntry() uses this to refuse starting a
+  // second one while it's non-empty.
+  readonly property bool installBusy: Object.keys(root.installingIds).length > 0
   property double lastFetchedAtMs: 0
 
   // ListView.header is typed as Component, so QML implicitly wraps its
@@ -275,6 +279,16 @@ Panel {
       return
     }
     if (root.installingIds[entry.id]) return
+    // installProc is a single shared Process, so it can only run one
+    // install at a time. Without this guard, clicking "Get" on a second
+    // entry while the first is still running overwrites installProc's
+    // command/entryId out from under it: the second install never actually
+    // starts, its card spins on "Installing…" forever, and onExited
+    // reports the first process's result under the second entry's id.
+    if (root.installBusy) {
+      root.setStatus("Wait for the current install to finish first", true)
+      return
+    }
     var installing = Object.create(null)
     for (var k in root.installingIds) installing[k] = root.installingIds[k]
     installing[entry.id] = true
@@ -519,6 +533,10 @@ Panel {
           bordered: true
           active: card.installed
           iconSpinning: card.installing
+          // Button has no built-in disabled state, so a busy dim is the
+          // only cue that clicking another card's "Get" right now won't
+          // do anything — installEntry() enforces that (see installBusy).
+          opacity: (root.installBusy && !card.installing && !card.installed && card.modelData.installType !== "manual") ? 0.5 : 1
           text: card.installed ? "✓ Installed" : (card.installing ? "Installing…" : (card.modelData.installType === "manual" ? "View" : "Get"))
           onClicked: {
             if (card.installed || card.installing) return
